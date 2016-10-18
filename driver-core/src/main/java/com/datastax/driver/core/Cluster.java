@@ -25,7 +25,6 @@ import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1222,6 +1221,19 @@ public class Cluster implements Closeable {
         }
 
         /**
+         * Sets the threading options to use for the newly created Cluster.
+         * <p/>
+         * If no options are set through this method, a new instance of {@link ThreadingOptions} will be used.
+         *
+         * @param options the options.
+         * @return this builder.
+         */
+        public Builder withThreadingOptions(ThreadingOptions options) {
+            configurationBuilder.withThreadingOptions(options);
+            return this;
+        }
+
+        /**
          * Set the {@link NettyOptions} to use for the newly created Cluster.
          * <p/>
          * If no Netty options are set through this method, {@link NettyOptions#DEFAULT_INSTANCE}
@@ -1317,13 +1329,13 @@ public class Cluster implements Closeable {
         ListeningExecutorService executor;
 
         // Work Queue used by executor.
-        LinkedBlockingQueue<Runnable> executorQueue;
+        BlockingQueue<Runnable> executorQueue;
 
         // An executor for tasks that might block some time, like creating new connection, but are generally not too critical.
         ListeningExecutorService blockingExecutor;
 
         // Work Queue used by blockingExecutor.
-        LinkedBlockingQueue<Runnable> blockingExecutorQueue;
+        BlockingQueue<Runnable> blockingExecutorQueue;
 
         ConnectionReaper reaper;
 
@@ -1362,16 +1374,17 @@ public class Cluster implements Closeable {
 
             this.configuration.register(this);
 
-            this.executorQueue = new LinkedBlockingQueue<Runnable>();
-            this.executor = makeExecutor(NON_BLOCKING_EXECUTOR_SIZE, "worker", executorQueue);
-            this.blockingExecutorQueue = new LinkedBlockingQueue<Runnable>();
-            this.blockingExecutor = makeExecutor(2, "blocking-task-worker", blockingExecutorQueue);
-            this.reconnectionExecutor = new ScheduledThreadPoolExecutor(2, threadFactory("reconnection"));
-            // scheduledTasksExecutor is used to process C* notifications. So having it mono-threaded ensures notifications are
-            // applied in the order received.
-            this.scheduledTasksExecutor = new ScheduledThreadPoolExecutor(1, threadFactory("scheduled-task-worker"));
+            ThreadingOptions threadingOptions = this.configuration.getThreadingOptions();
+            ThreadPoolExecutor tmpExecutor = threadingOptions.executor(clusterName);
+            this.executorQueue = tmpExecutor.getQueue();
+            this.executor = MoreExecutors.listeningDecorator(tmpExecutor);
+            ThreadPoolExecutor tmpBlockingExecutor = threadingOptions.blockingExecutor(clusterName);
+            this.blockingExecutorQueue = tmpBlockingExecutor.getQueue();
+            this.blockingExecutor = MoreExecutors.listeningDecorator(tmpBlockingExecutor);
+            this.reconnectionExecutor = threadingOptions.reconnectionExecutor(clusterName);
+            this.scheduledTasksExecutor = threadingOptions.scheduledTasksExecutor(clusterName);
 
-            this.reaper = new ConnectionReaper(this);
+            this.reaper = new ConnectionReaper(threadingOptions.reaperExecutor(clusterName));
             this.metadata = new Metadata(this);
             this.connectionFactory = new Connection.Factory(this, configuration);
             this.controlConnection = new ControlConnection(this);
@@ -1513,29 +1526,6 @@ public class Cluster implements Closeable {
 
         ProtocolVersion protocolVersion() {
             return connectionFactory.protocolVersion;
-        }
-
-        ThreadFactory threadFactory(String name) {
-            return new ThreadFactoryBuilder()
-                    .setNameFormat(clusterName + "-" + name + "-%d")
-                    // Back with Netty's thread factory in order to create FastThreadLocalThread instances. This allows
-                    // an optimization around ThreadLocals (we could use DefaultThreadFactory directly but it creates
-                    // slightly different thread names, so keep we keep a ThreadFactoryBuilder wrapper for backward
-                    // compatibility).
-                    .setThreadFactory(new DefaultThreadFactory("ignored name"))
-                    .build();
-        }
-
-        private ListeningExecutorService makeExecutor(int threads, String name, LinkedBlockingQueue<Runnable> workQueue) {
-            ThreadPoolExecutor executor = new ThreadPoolExecutor(threads,
-                    threads,
-                    DEFAULT_THREAD_KEEP_ALIVE,
-                    TimeUnit.SECONDS,
-                    workQueue,
-                    threadFactory(name));
-
-            executor.allowCoreThreadTimeOut(true);
-            return MoreExecutors.listeningDecorator(executor);
         }
 
         Cluster getCluster() {
@@ -2835,9 +2825,9 @@ public class Cluster implements Closeable {
             }
         };
 
-        ConnectionReaper(Cluster.Manager manager) {
-            executor = Executors.newScheduledThreadPool(1, manager.threadFactory("connection-reaper"));
-            executor.scheduleWithFixedDelay(reaperTask, INTERVAL_MS, INTERVAL_MS, TimeUnit.MILLISECONDS);
+        ConnectionReaper(ScheduledThreadPoolExecutor executor) {
+            this.executor = executor;
+            this.executor.scheduleWithFixedDelay(reaperTask, INTERVAL_MS, INTERVAL_MS, TimeUnit.MILLISECONDS);
         }
 
         void register(Connection connection, long terminateTime) {

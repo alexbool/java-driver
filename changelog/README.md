@@ -1,5 +1,10 @@
 ## Changelog
 
+### 3.0.5 (in progress)
+
+- [improvement] JAVA-262: Make internal executors customizable
+
+
 ### 3.0.4
 
 - [improvement] JAVA-1246: Driver swallows the real exception in a few cases
