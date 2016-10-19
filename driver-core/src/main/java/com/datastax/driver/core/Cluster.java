@@ -1328,8 +1328,14 @@ public class Cluster implements Closeable {
         // Executor used for tasks that shouldn't be executed on an IO thread. Used for short-lived, generally non-blocking tasks
         ListeningExecutorService executor;
 
+        // Work Queue used by executor.
+        BlockingQueue<Runnable> executorQueue;
+
         // An executor for tasks that might block some time, like creating new connection, but are generally not too critical.
         ListeningExecutorService blockingExecutor;
+
+        // Work Queue used by blockingExecutor.
+        BlockingQueue<Runnable> blockingExecutorQueue;
 
         ConnectionReaper reaper;
 
@@ -1369,9 +1375,15 @@ public class Cluster implements Closeable {
             this.configuration.register(this);
 
             ThreadingOptions threadingOptions = this.configuration.getThreadingOptions();
-            this.executor = MoreExecutors.listeningDecorator(threadingOptions.createExecutor(clusterName));
+            ExecutorService tmpExecutor = threadingOptions.createExecutor(clusterName);
+            this.executorQueue = (tmpExecutor instanceof ThreadPoolExecutor)
+                    ? ((ThreadPoolExecutor) tmpExecutor).getQueue() : null;
+            this.executor = MoreExecutors.listeningDecorator(tmpExecutor);
+            ExecutorService tmpBlockingExecutor = threadingOptions.createBlockingExecutor(clusterName);
+            this.blockingExecutorQueue = (tmpBlockingExecutor instanceof ThreadPoolExecutor)
+                    ? ((ThreadPoolExecutor) tmpBlockingExecutor).getQueue() : null;
             this.blockingExecutor = MoreExecutors.listeningDecorator(
-                    threadingOptions.createBlockingExecutor(clusterName));
+                    tmpBlockingExecutor);
             this.reconnectionExecutor = threadingOptions.createReconnectionExecutor(clusterName);
             this.scheduledTasksExecutor = threadingOptions.createScheduledTasksExecutor(clusterName);
 

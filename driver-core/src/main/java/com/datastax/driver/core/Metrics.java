@@ -80,18 +80,26 @@ public class Metrics {
         }
     });
 
-    private final Gauge<Integer> executorQueueDepth;
-    private final Gauge<Integer> blockingExecutorQueueDepth;
+    private final Gauge<Integer> executorQueueDepth = registry.register("executor-queue-depth", new Gauge<Integer>() {
+        @Override
+        public Integer getValue() {
+            return (manager.executorQueue != null) ? manager.executorQueue.size() : -1;
+        }
+    });
+
+    private final Gauge<Integer> blockingExecutorQueueDepth = registry.register("blocking-executor-queue-depth", new Gauge<Integer>() {
+        @Override
+        public Integer getValue() {
+            return (manager.blockingExecutorQueue != null) ? manager.blockingExecutorQueue.size() : -1;
+        }
+    });
+
     private final Gauge<Integer> reconnectionSchedulerQueueSize;
     private final Gauge<Integer> taskSchedulerQueueSize;
 
     Metrics(Cluster.Manager manager) {
         this.manager = manager;
 
-        this.executorQueueDepth = registry.register("executor-queue-depth",
-                buildQueueSizeGauge(manager.executor));
-        this.blockingExecutorQueueDepth = registry.register("blocking-executor-queue-depth",
-                buildQueueSizeGauge(manager.blockingExecutor));
         this.reconnectionSchedulerQueueSize = registry.register("reconnection-scheduler-task-count",
                 buildQueueSizeGauge(manager.reconnectionExecutor));
         this.taskSchedulerQueueSize = registry.register("task-scheduler-task-count",
