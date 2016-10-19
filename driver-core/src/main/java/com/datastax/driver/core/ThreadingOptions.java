@@ -26,13 +26,13 @@ import java.util.concurrent.*;
  * The methods in this class are invoked when the cluster initializes. To customize the behavior, extend the class and
  * override the appropriate methods.
  * <p/>
- * This is mainly intended to allow customization and instrumentation of driver threads. Keep the executors separate, as
- * using a common one could introduce unintended consequences like deadlocks (we're working to simplify the driver's
- * architecture and reduce the number of executors in a future release). The default implementations use unbounded
- * queues, which is appropriate when the driver is properly configured; the only reason you would want to use bounded
- * queues is to limit memory consumption in case of a bug or bad configuration. In that case, make sure to use a
- * {@link RejectedExecutionHandler} that throws, such as {@link java.util.concurrent.ThreadPoolExecutor.AbortPolicy}; a
- * blocking handler could introduce deadlocks.
+ * This is mainly intended to allow customization and instrumentation of driver threads. Each method must return a
+ * newly-allocated executor; don't use a shared executor, as this could introduce unintended consequences like deadlocks
+ * (we're working to simplify the driver's architecture and reduce the number of executors in a future release). The
+ * default implementations use unbounded queues, which is appropriate when the driver is properly configured; the only
+ * reason you would want to use bounded queues is to limit memory consumption in case of a bug or bad configuration. In
+ * that case, make sure to use a {@link RejectedExecutionHandler} that throws, such as
+ * {@link java.util.concurrent.ThreadPoolExecutor.AbortPolicy}; a blocking handler could introduce deadlocks.
  * <p/>
  * Netty uses a separate pool for I/O operations, that can be configured via {@link NettyOptions}.
  */
@@ -52,7 +52,7 @@ public class ThreadingOptions {
      * @param executorName a name that identifies the executor.
      * @return the thread factory.
      */
-    public ThreadFactory threadFactory(String clusterName, String executorName) {
+    public ThreadFactory createThreadFactory(String clusterName, String executorName) {
         return new ThreadFactoryBuilder()
                 .setNameFormat(clusterName + "-" + executorName + "-%d")
                 // Back with Netty's thread factory in order to create FastThreadLocalThread instances. This allows
@@ -64,8 +64,8 @@ public class ThreadingOptions {
     }
 
     /**
-     * Builds the generic administration executor, used for tasks such as triggering registered
-     * {@link SchemaChangeListener}s, reacting to node state changes, and metadata updates.
+     * Builds the main internal executor, used for tasks such as scheduling speculative executions, triggering
+     * registered {@link SchemaChangeListener}s, reacting to node state changes, and metadata updates.
      * <p/>
      * The default implementation sets the pool size to the number of available cores.
      *
@@ -73,12 +73,12 @@ public class ThreadingOptions {
      *                    {@link com.datastax.driver.core.Cluster.Builder#withClusterName(String)}.
      * @return the executor.
      */
-    public ThreadPoolExecutor executor(String clusterName) {
+    public ExecutorService createExecutor(String clusterName) {
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 NON_BLOCKING_EXECUTOR_SIZE, NON_BLOCKING_EXECUTOR_SIZE,
                 DEFAULT_THREAD_KEEP_ALIVE_SECONDS, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(),
-                threadFactory(clusterName, "worker"));
+                createThreadFactory(clusterName, "worker"));
         executor.allowCoreThreadTimeOut(true);
         return executor;
     }
@@ -92,12 +92,12 @@ public class ThreadingOptions {
      *                    {@link com.datastax.driver.core.Cluster.Builder#withClusterName(String)}.
      * @return the executor.
      */
-    public ThreadPoolExecutor blockingExecutor(String clusterName) {
+    public ExecutorService createBlockingExecutor(String clusterName) {
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 2, 2,
                 DEFAULT_THREAD_KEEP_ALIVE_SECONDS, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(),
-                threadFactory(clusterName, "worker"));
+                createThreadFactory(clusterName, "worker"));
         executor.allowCoreThreadTimeOut(true);
         return executor;
     }
@@ -111,8 +111,8 @@ public class ThreadingOptions {
      *                    {@link com.datastax.driver.core.Cluster.Builder#withClusterName(String)}.
      * @return the executor.
      */
-    public ScheduledThreadPoolExecutor reconnectionExecutor(String clusterName) {
-        return new ScheduledThreadPoolExecutor(2, threadFactory(clusterName, "reconnection"));
+    public ScheduledExecutorService createReconnectionExecutor(String clusterName) {
+        return new ScheduledThreadPoolExecutor(2, createThreadFactory(clusterName, "reconnection"));
     }
 
     /**
@@ -124,8 +124,8 @@ public class ThreadingOptions {
      *                    {@link com.datastax.driver.core.Cluster.Builder#withClusterName(String)}.
      * @return the executor.
      */
-    public ScheduledThreadPoolExecutor scheduledTasksExecutor(String clusterName) {
-        return new ScheduledThreadPoolExecutor(1, threadFactory(clusterName, "scheduled-task-worker"));
+    public ScheduledExecutorService createScheduledTasksExecutor(String clusterName) {
+        return new ScheduledThreadPoolExecutor(1, createThreadFactory(clusterName, "scheduled-task-worker"));
     }
 
     /**
@@ -137,7 +137,7 @@ public class ThreadingOptions {
      *                    {@link com.datastax.driver.core.Cluster.Builder#withClusterName(String)}.
      * @return the executor.
      */
-    public ScheduledThreadPoolExecutor reaperExecutor(String clusterName) {
-        return new ScheduledThreadPoolExecutor(1, threadFactory(clusterName, "connection-reaper"));
+    public ScheduledExecutorService createReaperExecutor(String clusterName) {
+        return new ScheduledThreadPoolExecutor(1, createThreadFactory(clusterName, "connection-reaper"));
     }
 }

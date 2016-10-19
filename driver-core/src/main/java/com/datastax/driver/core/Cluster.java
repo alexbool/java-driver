@@ -1322,20 +1322,14 @@ public class Cluster implements Closeable {
 
         final ConvictionPolicy.Factory convictionPolicyFactory = new ConvictionPolicy.DefaultConvictionPolicy.Factory();
 
-        ScheduledThreadPoolExecutor reconnectionExecutor;
-        ScheduledThreadPoolExecutor scheduledTasksExecutor;
+        ScheduledExecutorService reconnectionExecutor;
+        ScheduledExecutorService scheduledTasksExecutor;
 
         // Executor used for tasks that shouldn't be executed on an IO thread. Used for short-lived, generally non-blocking tasks
         ListeningExecutorService executor;
 
-        // Work Queue used by executor.
-        BlockingQueue<Runnable> executorQueue;
-
         // An executor for tasks that might block some time, like creating new connection, but are generally not too critical.
         ListeningExecutorService blockingExecutor;
-
-        // Work Queue used by blockingExecutor.
-        BlockingQueue<Runnable> blockingExecutorQueue;
 
         ConnectionReaper reaper;
 
@@ -1375,16 +1369,13 @@ public class Cluster implements Closeable {
             this.configuration.register(this);
 
             ThreadingOptions threadingOptions = this.configuration.getThreadingOptions();
-            ThreadPoolExecutor tmpExecutor = threadingOptions.executor(clusterName);
-            this.executorQueue = tmpExecutor.getQueue();
-            this.executor = MoreExecutors.listeningDecorator(tmpExecutor);
-            ThreadPoolExecutor tmpBlockingExecutor = threadingOptions.blockingExecutor(clusterName);
-            this.blockingExecutorQueue = tmpBlockingExecutor.getQueue();
-            this.blockingExecutor = MoreExecutors.listeningDecorator(tmpBlockingExecutor);
-            this.reconnectionExecutor = threadingOptions.reconnectionExecutor(clusterName);
-            this.scheduledTasksExecutor = threadingOptions.scheduledTasksExecutor(clusterName);
+            this.executor = MoreExecutors.listeningDecorator(threadingOptions.createExecutor(clusterName));
+            this.blockingExecutor = MoreExecutors.listeningDecorator(
+                    threadingOptions.createBlockingExecutor(clusterName));
+            this.reconnectionExecutor = threadingOptions.createReconnectionExecutor(clusterName);
+            this.scheduledTasksExecutor = threadingOptions.createScheduledTasksExecutor(clusterName);
 
-            this.reaper = new ConnectionReaper(threadingOptions.reaperExecutor(clusterName));
+            this.reaper = new ConnectionReaper(threadingOptions.createReaperExecutor(clusterName));
             this.metadata = new Metadata(this);
             this.connectionFactory = new Connection.Factory(this, configuration);
             this.controlConnection = new ControlConnection(this);
@@ -2825,7 +2816,7 @@ public class Cluster implements Closeable {
             }
         };
 
-        ConnectionReaper(ScheduledThreadPoolExecutor executor) {
+        ConnectionReaper(ScheduledExecutorService executor) {
             this.executor = executor;
             this.executor.scheduleWithFixedDelay(reaperTask, INTERVAL_MS, INTERVAL_MS, TimeUnit.MILLISECONDS);
         }
